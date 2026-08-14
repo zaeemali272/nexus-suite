@@ -1,0 +1,21 @@
+[package]
+name = "nexus-net"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nexus Suite Engineering Team"]
+description = "High-performance QUIC multiplexed network transport engine using Quinn."
+
+[dependencies]
+nexus-core = { path = "../nexus-core" }
+quinn = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = "0.13"
+tokio = { version = "1.41", features = ["full"] }
+bytes = "1.9"
+tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+postcard = { version = "1.0", features = ["alloc"] }
+futures-util = "0.3"
+
+[dev-dependencies]
+tempfile = "3.14"

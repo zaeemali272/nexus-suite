@@ -1,0 +1,23 @@
+[package]
+name = "nexus-daemon"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nexus Suite Engineering Team"]
+description = "Headless Tokio asynchronous background daemon and state actor runtime for Nexus Suite."
+
+[[bin]]
+name = "nexus-daemon"
+path = "src/main.rs"
+
+[dependencies]
+nexus-core = { path = "../nexus-core" }
+nexus-db = { path = "../nexus-db" }
+nexus-net = { path = "../nexus-net" }
+tokio = { version = "1.41", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3.14"

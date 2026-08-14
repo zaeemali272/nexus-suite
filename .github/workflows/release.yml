@@ -1,0 +1,74 @@
+name: Nexus Suite Automated Cross-Platform Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build & Package Binary (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: nexus-suite-linux-amd64.tar.gz
+            asset_name: nexus-suite-linux-amd64.tar.gz
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: nexus-suite-linux-arm64.tar.gz
+            asset_name: nexus-suite-linux-arm64.tar.gz
+
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: nexus-suite-windows-x64.zip
+            asset_name: nexus-suite-windows-x64.zip
+
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact_name: nexus-suite-macos-universal.tar.gz
+            asset_name: nexus-suite-macos-universal.tar.gz
+
+    steps:
+      - name: Checkout Source Repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libsqlite3-dev
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build Optimized Release Binaries
+        run: cargo build --workspace --release --target ${{ matrix.target }}
+
+      - name: Package Release Assets (Linux / macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          tar -czvf ${{ matrix.asset_name }} -C target/${{ matrix.target }}/release nexus-client nexus-daemon KANBAN.md README.md
+
+      - name: Package Release Assets (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          powershell Compress-Archive -Path target/${{ matrix.target }}/release/nexus-client.exe, target/${{ matrix.target }}/release/nexus-daemon.exe, KANBAN.md, README.md -DestinationPath ${{ matrix.asset_name }}
+
+      - name: Publish GitHub Release Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,22 @@
+[package]
+name = "nexus-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nexus Suite Engineering Team"]
+description = "Core protocol definitions, zero-copy data models, and serialization schema for Nexus Suite."
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+postcard = { version = "1.0", features = ["alloc"] }
+thiserror = "2.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+ring = "0.17"
+
+[dev-dependencies]
+tokio = { version = "1.41", features = ["full"] }
+criterion = "0.5"
+
+[[bench]]
+name = "benchmark"
+harness = false

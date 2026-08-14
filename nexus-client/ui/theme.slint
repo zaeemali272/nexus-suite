@@ -1,0 +1,81 @@
+export global ThemePalette {
+    // 0: Prism Light, 1: Nordic Slate, 2: Midnight Abyss, 3: Pure Void (OLED)
+    in-out property <int> theme-mode: 2;
+
+    // Optional Background Pattern Overlay (Enabled by Default)
+    in-out property <bool> show-pattern-overlay: true;
+
+    out property <string> theme-name: 
+        theme-mode == 0 ? "Prism Light" :
+        theme-mode == 1 ? "Nordic Slate" :
+        theme-mode == 2 ? "Midnight Abyss" : "Pure Void";
+
+    // Window Background (Unified semi-transparent glass)
+    out property <color> background: 
+        theme-mode == 0 ? #f8fafc :
+        theme-mode == 1 ? #1e293b :
+        theme-mode == 2 ? #090d16 : #000000;
+
+    // Glass Panels & Surfaces (Semi-transparent fills)
+    out property <color> surface: 
+        theme-mode == 0 ? #ffffff99 :
+        theme-mode == 1 ? #33415566 :
+        theme-mode == 2 ? #16192588 : #111111aa;
+
+    out property <color> surface-variant: 
+        theme-mode == 0 ? #f1f5f9aa :
+        theme-mode == 1 ? #47556966 :
+        theme-mode == 2 ? #24293e88 : #1c1c1caa;
+
+    out property <color> surface-hover: 
+        theme-mode == 0 ? #e2e8f088 :
+        theme-mode == 1 ? #47556988 :
+        theme-mode == 2 ? #2a2f45aa : #282828aa;
+
+    // Subtle Borders
+    out property <color> border: 
+        theme-mode == 0 ? #e2e8f0 :
+        theme-mode == 1 ? #334155 :
+        theme-mode == 2 ? #1a1e2b : #181818;
+
+    // Subtle Pattern Grid Color
+    out property <color> pattern-color: 
+        theme-mode == 0 ? #cbd5e144 :
+        theme-mode == 1 ? #47556944 :
+        theme-mode == 2 ? #33415544 : #26262644;
+
+    // Typography
+    out property <color> text-primary: 
+        theme-mode == 0 ? #0f172a :
+        theme-mode == 1 ? #f8fafc :
+        theme-mode == 2 ? #f1f5f9 : #ffffff;
+
+    out property <color> text-secondary: 
+        theme-mode == 0 ? #64748b :
+        theme-mode == 1 ? #94a3b8 :
+        theme-mode == 2 ? #94a3b8 : #888888;
+
+    out property <color> text-accent: 
+        theme-mode == 0 ? #4f46e5 :
+        theme-mode == 1 ? #38bdf8 :
+        theme-mode == 2 ? #a855f7 : #c084fc;
+
+    // Accents & State
+    out property <color> accent: 
+        theme-mode == 0 ? #4f46e5 :
+        theme-mode == 1 ? #0284c7 :
+        theme-mode == 2 ? #9d4edd : #a855f7;
+
+    out property <color> accent-hover: 
+        theme-mode == 0 ? #6366f1 :
+        theme-mode == 1 ? #38bdf8 :
+        theme-mode == 2 ? #c084fc : #d8b4fe;
+
+    out property <color> success: #10b981;
+    out property <color> danger: #ef4444;
+
+    out property <color> badge-background: 
+        theme-mode == 0 ? #e0e7ff :
+        theme-mode == 1 ? #0c4a6e :
+        theme-mode == 2 ? #2e1065 : #3b0764;
+}

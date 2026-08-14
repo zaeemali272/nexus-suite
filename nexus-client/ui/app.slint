@@ -1,0 +1,1005 @@
+import { Button, VerticalBox, HorizontalBox, LineEdit, ListView } from "std-widgets.slint";
+import { ThemePalette } from "theme.slint";
+export { ThemePalette }
+
+export struct MessageData {
+    sender: string,
+    content: string,
+    timestamp: string,
+    is-me: bool,
+}
+
+export struct MemberData {
+    name: string,
+    status: string,
+    is-in-voice: bool,
+}
+
+export component AppWindow inherits Window {
+    title: "Nexus Suite — Ultra-High-Performance Native Suite";
+    min-width: 1100px;
+    min-height: 700px;
+    preferred-width: 1240px;
+    preferred-height: 780px;
+    background: ThemePalette.background;
+
+    animate background { duration: 250ms; easing: ease-in-out; }
+
+    // Authentication & Server Health State
+    in-out property <bool> is-authenticated: false;
+    in-out property <int> auth-mode: 0; // 0: Sign In, 1: Sign Up
+    in-out property <string> auth-error: "";
+    in-out property <string> active-username: "Guest";
+    in-out property <bool> is-server-online: true;
+    in-out property <string> server-status-msg: "Server Online";
+    in-out property <bool> is-direct-p2p: true;
+    in-out property <string> connection-mode-msg: "Direct P2P";
+
+    // Workspace & Channel Navigation
+    in-out property <string> channel-title: "# general";
+    in-out property <bool> is-mobile-view: false;
+    in-out property <bool> is-drawer-open: false;
+    in-out property <bool> is-in-voice-call: false;
+    in-out property <bool> is-settings-open: false;
+    in-out property <bool> is-add-friend-open: false;
+    in-out property <int> active-settings-tab: 0; // 0: Appearance, 1: Security, 2: Voice, 3: About
+    in-out property <int> selected-server-index: 0;
+
+    // RAM-Only Hardware Metric (Polled live every 5s via sysinfo in Rust backend)
+    in-out property <string> ram-usage: "34.2 MB";
+
+    in-out property <[MessageData]> messages: [
+        { sender: "System", content: "Welcome to Nexus Suite. E2EE architecture & voice channel active.", timestamp: "12:00 PM", is-me: false },
+        { sender: "Alice", content: "AES-256-GCM authenticated encryption verified active.", timestamp: "12:01 PM", is-me: false },
+        { sender: "You", content: "QUIC datagram voice pipeline & SQLite WAL storage ready.", timestamp: "12:02 PM", is-me: true },
+    ];
+
+    in-out property <[MemberData]> active-members: [
+        { name: "Alice (You)", status: "Online", is-in-voice: true },
+        { name: "Bob", status: "In Voice", is-in-voice: true },
+        { name: "Charlie", status: "Offline", is-in-voice: false },
+    ];
+
+    // Callbacks to Rust Runtime
+    callback send-message(string);
+    callback select-theme-preset(int);
+    callback toggle-pattern-overlay();
+    callback toggle-voice-call();
+    callback add-friend-request(string);
+    callback authenticate-user(string, string, bool); // username, password, is_signup
+
+    // Main Glass Window Container
+    Rectangle {
+        // Optional Background Subtle WhatsApp-Style Micro-Dot Watermark Overlay
+        if ThemePalette.show-pattern-overlay: Rectangle {
+            width: 100%;
+            height: 100%;
+            opacity: 0.05;
+
+            VerticalBox {
+                padding: 24px;
+                spacing: 48px;
+                for row in 14: HorizontalBox {
+                    spacing: 48px;
+                    for col in 22: Rectangle {
+                        width: 3px;
+                        height: 3px;
+                        border-radius: 1.5px;
+                        background: ThemePalette.text-primary;
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            padding: 0px;
+            spacing: 0px;
+
+            // COLUMN 1: Far-Left Dedicated Server / Workspace Rail (72px) - Default "Nexus" Workspace
+            Rectangle {
+                width: 72px;
+                background: ThemePalette.surface;
+                animate background { duration: 250ms; }
+
+                VerticalBox {
+                    padding-top: 14px;
+                    padding-bottom: 14px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 12px;
+
+                    // Home Badge (Default Nexus Room Icon)
+                    Rectangle {
+                        width: 48px;
+                        height: 48px;
+                        border-radius: 24px;
+                        background: ThemePalette.accent;
+                        animate background { duration: 150ms; }
+
+                        Text {
+                            text: "N";
+                            font-size: 20px;
+                            font-weight: 900;
+                            color: #ffffff;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            clicked => { root.selected-server-index = 0; }
+                        }
+                    }
+
+                    // Divider
+                    Rectangle {
+                        width: 32px;
+                        height: 2px;
+                        background: ThemePalette.border;
+                    }
+
+                    // Repurposed Add Server / Add Friend Icon Button (+)
+                    Rectangle {
+                        width: 48px;
+                        height: 48px;
+                        border-radius: 24px;
+                        background: ThemePalette.surface-variant;
+                        animate background { duration: 150ms; }
+
+                        Text {
+                            text: "+";
+                            font-size: 22px;
+                            font-weight: 700;
+                            color: ThemePalette.success;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            clicked => { root.is-add-friend-open = true; }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            // Divider Line
+            Rectangle { width: 1px; background: ThemePalette.border; animate background { duration: 250ms; } }
+
+            // COLUMN 2: Channel List Pane (220px) - Single Unified "# general" Channel (Chat & Voice)
+            Rectangle {
+                width: root.is-mobile-view ? (root.is-drawer-open ? 220px : 0px) : 220px;
+                background: ThemePalette.surface;
+                animate width { duration: 200ms; easing: ease-out; }
+                animate background { duration: 250ms; easing: ease-in-out; }
+
+                VerticalBox {
+                    padding: 14px;
+                    spacing: 12px;
+
+                    // Clean Sidebar Header
+                    HorizontalBox {
+                        spacing: 8px;
+                        Text {
+                            text: "NEXUS WORKSPACE";
+                            font-size: 14px;
+                            font-weight: 800;
+                            color: ThemePalette.text-accent;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+
+                    Text {
+                        text: "CHANNELS";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: ThemePalette.text-secondary;
+                    }
+
+                    // Single Unified General Channel (Voice & Chat Combined)
+                    Rectangle {
+                        height: 42px;
+                        background: ThemePalette.surface-variant;
+                        border-radius: 12px;
+                        animate background { duration: 150ms; }
+
+                        HorizontalBox {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 8px;
+
+                            Text {
+                                text: "# general";
+                                color: ThemePalette.text-primary;
+                                vertical-alignment: center;
+                                font-size: 14px;
+                                font-weight: 700;
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
+
+                            // Toggle Voice Channel Button
+                            Text {
+                                text: root.is-in-voice-call ? "🎙️ ON" : "🎤 Voice";
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: root.is-in-voice-call ? ThemePalette.success : ThemePalette.text-secondary;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        TouchArea {
+                            clicked => { root.toggle-voice-call(); }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+
+                    // RAM-Only Hardware Monitor Footer
+                    Rectangle {
+                        height: 44px;
+                        background: ThemePalette.surface-variant;
+                        border-radius: 14px;
+                        animate background { duration: 250ms; }
+
+                        HorizontalBox {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 8px;
+
+                            Text {
+                                text: "💾 RAM: " + root.ram-usage;
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: ThemePalette.success;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Absolute Bottom Settings Gear Icon Bar
+                    Rectangle {
+                        height: 36px;
+                        background: transparent;
+
+                        HorizontalBox {
+                            padding: 0px;
+                            Text {
+                                text: "👤 " + root.active-username;
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: ThemePalette.text-primary;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Rectangle {
+                                width: 32px;
+                                height: 32px;
+                                border-radius: 16px;
+                                background: ThemePalette.surface-variant;
+
+                                Text {
+                                    text: "⚙";
+                                    font-size: 16px;
+                                    color: ThemePalette.text-secondary;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                TouchArea {
+                                    clicked => { root.is-settings-open = true; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Divider Line
+            Rectangle { width: 1px; background: ThemePalette.border; animate background { duration: 250ms; } }
+
+            // COLUMN 3: Central Main Chat View (Seamless Layout)
+            VerticalBox {
+                padding: 0px;
+                spacing: 0px;
+                horizontal-stretch: 1;
+
+                // Chat Header Bar
+                Rectangle {
+                    height: 56px;
+                    background: ThemePalette.surface;
+                    animate background { duration: 250ms; }
+
+                    HorizontalBox {
+                        padding: 16px;
+                        spacing: 8px;
+
+                        if root.is-mobile-view: Button {
+                            text: "☰";
+                            clicked => { root.is-drawer-open = !root.is-drawer-open; }
+                        }
+
+                        Text {
+                            text: root.channel-title + " (Chat & Voice)";
+                            font-size: 16px;
+                            font-weight: 700;
+                            color: ThemePalette.text-primary;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        // Server Offline Warning Status Banner
+                        if !root.is-server-online: Rectangle {
+                            height: 28px;
+                            background: #ef444422;
+                            border-radius: 14px;
+                            border-width: 1px;
+                            border-color: #ef4444;
+
+                            HorizontalBox {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                Text {
+                                    text: "⚠️ Server is not working / offline";
+                                    font-size: 11px;
+                                    color: #ef4444;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Button {
+                            text: root.is-in-voice-call ? "🔴 Disconnect Voice" : "🎙️ Join Voice";
+                            primary: root.is-in-voice-call;
+                            clicked => { root.toggle-voice-call(); }
+                        }
+
+                        Rectangle {
+                            height: 28px;
+                            background: ThemePalette.badge-background;
+                            border-radius: 14px;
+                            animate background { duration: 250ms; }
+                            HorizontalBox {
+                                padding: 8px;
+                                Text {
+                                    text: "🔒 E2EE AES-256-GCM";
+                                    font-size: 11px;
+                                    color: ThemePalette.success;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // Direct P2P vs Relayed Connection Mode Badge
+                        Rectangle {
+                            height: 28px;
+                            background: root.is-direct-p2p ? #10b98122 : #f59e0b22;
+                            border-radius: 14px;
+                            border-width: 1px;
+                            border-color: root.is-direct-p2p ? #10b981 : #f59e0b;
+                            animate background { duration: 250ms; }
+                            HorizontalBox {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                Text {
+                                    text: root.is-direct-p2p ? "⚡ Direct P2P" : "🔄 Relayed";
+                                    font-size: 11px;
+                                    color: root.is-direct-p2p ? #10b981 : #f59e0b;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: ThemePalette.border; animate background { duration: 250ms; } }
+
+                // Material Padded Chat Stream with Rounded Chat Bubbles
+                ListView {
+                    for msg in root.messages: VerticalBox {
+                        padding: 6px;
+                        spacing: 0px;
+
+                        HorizontalBox {
+                            if msg.is-me: Rectangle { horizontal-stretch: 1; }
+
+                            Rectangle {
+                                max-width: 600px;
+                                background: msg.is-me ? ThemePalette.badge-background : ThemePalette.surface-variant;
+                                border-radius: 14px;
+                                border-width: 1px;
+                                border-color: ThemePalette.border;
+                                animate background { duration: 150ms; }
+
+                                VerticalBox {
+                                    padding: 10px;
+                                    spacing: 4px;
+
+                                    HorizontalBox {
+                                        spacing: 8px;
+                                        Text {
+                                            text: msg.sender;
+                                            font-size: 12px;
+                                            font-weight: 700;
+                                            color: msg.is-me ? ThemePalette.text-accent : ThemePalette.accent;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Text {
+                                            text: msg.timestamp;
+                                            font-size: 10px;
+                                            color: ThemePalette.text-secondary;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: msg.content;
+                                        font-size: 14px;
+                                        color: ThemePalette.text-primary;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
+                            if !msg.is-me: Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: ThemePalette.border; animate background { duration: 250ms; } }
+
+                // Tall, Fully Rounded (52px / 26px radius), Transparent Glassmorphic Input Container & Circular Send Button
+                Rectangle {
+                    height: 80px;
+                    background: transparent;
+
+                    HorizontalBox {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        padding-top: 14px;
+                        padding-bottom: 14px;
+                        spacing: 12px;
+
+                        // Tall Fully Rounded Transparent Glass Pill Container (52px high, 26px radius)
+                        Rectangle {
+                            height: 52px;
+                            horizontal-stretch: 1;
+                            background: ThemePalette.surface-variant;
+                            border-radius: 26px;
+                            border-width: 1px;
+                            border-color: ThemePalette.border;
+                            animate background { duration: 150ms; }
+
+                            HorizontalBox {
+                                padding-left: 18px;
+                                padding-right: 18px;
+
+                                input := LineEdit {
+                                    placeholder-text: "Type an encrypted message in #general...";
+                                    horizontal-stretch: 1;
+                                    accepted(text) => {
+                                        root.send-message(text);
+                                        input.text = "";
+                                    }
+                                }
+                            }
+                        }
+
+                        // Compact Circular Accent Send Icon Button (52px high / 26px radius)
+                        Rectangle {
+                            width: 52px;
+                            height: 52px;
+                            border-radius: 26px;
+                            background: ThemePalette.accent;
+                            animate background { duration: 150ms; }
+
+                            Text {
+                                text: "➢";
+                                font-size: 18px;
+                                color: #ffffff;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    root.send-message(input.text);
+                                    input.text = "";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Divider Line (Desktop view only)
+            if !root.is-mobile-view: Rectangle { width: 1px; background: ThemePalette.border; animate background { duration: 250ms; } }
+
+            // COLUMN 4: Right Members Panel (220px Desktop View)
+            if !root.is-mobile-view: Rectangle {
+                width: 220px;
+                background: ThemePalette.surface;
+                animate background { duration: 250ms; }
+
+                VerticalBox {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "ONLINE MEMBERS";
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: ThemePalette.text-secondary;
+                    }
+
+                    for member in root.active-members: VerticalBox {
+                        spacing: 2px;
+                        HorizontalBox {
+                            spacing: 6px;
+                            Text {
+                                text: member.name;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: ThemePalette.text-primary;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            if member.is-in-voice: Text {
+                                text: "🎙️";
+                                font-size: 12px;
+                            }
+                        }
+                        Text {
+                            text: member.status;
+                            font-size: 10px;
+                            color: member.is-in-voice ? ThemePalette.success : ThemePalette.text-secondary;
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+        }
+
+        // Add Room / Add Friend Centered Modal Overlay
+        if root.is-add-friend-open: Rectangle {
+            width: 100%;
+            height: 100%;
+            background: #00000088;
+
+            Rectangle {
+                width: 480px;
+                height: 260px;
+                background: ThemePalette.background;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: ThemePalette.border;
+
+                VerticalBox {
+                    padding: 20px;
+                    spacing: 16px;
+
+                    HorizontalBox {
+                        Text {
+                            text: "➕ Add Room / Friend Request";
+                            font-size: 16px;
+                            font-weight: 700;
+                            color: ThemePalette.text-primary;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Button {
+                            text: "✕";
+                            clicked => { root.is-add-friend-open = false; }
+                        }
+                    }
+
+                    Text {
+                        text: "Enter Peer ID, Username, or Room Channel Name:";
+                        font-size: 12px;
+                        color: ThemePalette.text-secondary;
+                    }
+
+                    friend-input := LineEdit {
+                        placeholder-text: "e.g. PeerId (UUID), Username, or #room...";
+                    }
+
+                    HorizontalBox {
+                        Rectangle { horizontal-stretch: 1; }
+                        Button {
+                            text: "Submit / Send Request";
+                            primary: true;
+                            clicked => {
+                                root.add-friend-request(friend-input.text);
+                                friend-input.text = "";
+                                root.is-add-friend-open = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Dedicated Centered Settings Modal Overlay
+        if root.is-settings-open: Rectangle {
+            width: 100%;
+            height: 100%;
+            background: #00000088; // Semi-transparent backdrop blur scrim
+
+            Rectangle {
+                width: 760px;
+                height: 540px;
+                background: ThemePalette.background;
+                border-radius: 20px;
+                border-width: 1px;
+                border-color: ThemePalette.border;
+                animate background { duration: 250ms; }
+
+                VerticalBox {
+                    padding: 0px;
+                    spacing: 0px;
+
+                    // Modal Header Bar
+                    Rectangle {
+                        height: 58px;
+                        background: ThemePalette.surface;
+                        border-top-left-radius: 20px;
+                        border-top-right-radius: 20px;
+
+                        HorizontalBox {
+                            padding-left: 20px;
+                            padding-right: 20px;
+                            spacing: 12px;
+                            Text {
+                                text: "⚙ Nexus Settings & Preferences";
+                                font-size: 16px;
+                                font-weight: 800;
+                                color: ThemePalette.text-primary;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button {
+                                text: "✕ Close";
+                                clicked => { root.is-settings-open = false; }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: ThemePalette.border; }
+
+                    // Settings Body: Left Navigation (220px) & Right Content Area
+                    HorizontalBox {
+                        padding: 0px;
+                        spacing: 0px;
+                        vertical-stretch: 1;
+
+                        // Left Settings Navigation Tab Column (220px)
+                        Rectangle {
+                            width: 220px;
+                            background: ThemePalette.surface;
+
+                            VerticalBox {
+                                padding: 14px;
+                                spacing: 8px;
+
+                                // Tab 0 Card: Appearance & Theme
+                                Rectangle {
+                                    height: 42px;
+                                    border-radius: 10px;
+                                    background: root.active-settings-tab == 0 ? ThemePalette.accent : transparent;
+                                    animate background { duration: 150ms; }
+
+                                    HorizontalBox {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: "🎨  Appearance & Theme";
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: root.active-settings-tab == 0 ? #ffffff : ThemePalette.text-primary;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        clicked => { root.active-settings-tab = 0; }
+                                    }
+                                }
+
+                                // Tab 1 Card: E2EE Security
+                                Rectangle {
+                                    height: 42px;
+                                    border-radius: 10px;
+                                    background: root.active-settings-tab == 1 ? ThemePalette.accent : transparent;
+                                    animate background { duration: 150ms; }
+
+                                    HorizontalBox {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: "🔒  E2EE Security";
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: root.active-settings-tab == 1 ? #ffffff : ThemePalette.text-primary;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        clicked => { root.active-settings-tab = 1; }
+                                    }
+                                }
+
+                                // Tab 2 Card: Voice & Audio
+                                Rectangle {
+                                    height: 42px;
+                                    border-radius: 10px;
+                                    background: root.active-settings-tab == 2 ? ThemePalette.accent : transparent;
+                                    animate background { duration: 150ms; }
+
+                                    HorizontalBox {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: "🎙️  Voice & Audio";
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: root.active-settings-tab == 2 ? #ffffff : ThemePalette.text-primary;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        clicked => { root.active-settings-tab = 2; }
+                                    }
+                                }
+
+                                // Tab 3 Card: About Nexus Suite
+                                Rectangle {
+                                    height: 42px;
+                                    border-radius: 10px;
+                                    background: root.active-settings-tab == 3 ? ThemePalette.accent : transparent;
+                                    animate background { duration: 150ms; }
+
+                                    HorizontalBox {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: "ℹ️  About Nexus Suite";
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: root.active-settings-tab == 3 ? #ffffff : ThemePalette.text-primary;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        clicked => { root.active-settings-tab = 3; }
+                                    }
+                                }
+
+                                Rectangle { vertical-stretch: 1; }
+                            }
+                        }
+
+                        Rectangle { width: 1px; background: ThemePalette.border; }
+
+                        // Right Settings Content View (Spacious Layout)
+                        VerticalBox {
+                            padding: 24px;
+                            spacing: 18px;
+                            horizontal-stretch: 1;
+
+                            // Tab 0: Appearance & Theme Tab
+                            if root.active-settings-tab == 0: VerticalBox {
+                                spacing: 16px;
+
+                                Text {
+                                    text: "PRESET COLOR PALETTES";
+                                    font-size: 12px;
+                                    font-weight: 800;
+                                    color: ThemePalette.text-secondary;
+                                }
+
+                                HorizontalBox {
+                                    spacing: 12px;
+                                    Button {
+                                        text: "Prism Light";
+                                        primary: ThemePalette.theme-mode == 0;
+                                        clicked => {
+                                            ThemePalette.theme-mode = 0;
+                                            root.select-theme-preset(0);
+                                        }
+                                    }
+                                    Button {
+                                        text: "Nordic Slate";
+                                        primary: ThemePalette.theme-mode == 1;
+                                        clicked => {
+                                            ThemePalette.theme-mode = 1;
+                                            root.select-theme-preset(1);
+                                        }
+                                    }
+                                }
+
+                                HorizontalBox {
+                                    spacing: 12px;
+                                    Button {
+                                        text: "Midnight Abyss";
+                                        primary: ThemePalette.theme-mode == 2;
+                                        clicked => {
+                                            ThemePalette.theme-mode = 2;
+                                            root.select-theme-preset(2);
+                                        }
+                                    }
+                                    Button {
+                                        text: "Pure Void / OLED";
+                                        primary: ThemePalette.theme-mode == 3;
+                                        clicked => {
+                                            ThemePalette.theme-mode = 3;
+                                            root.select-theme-preset(3);
+                                        }
+                                    }
+                                }
+
+                                Rectangle { height: 1px; background: ThemePalette.border; }
+
+                                Text {
+                                    text: "VISUAL TEXTURES & EFFECTS";
+                                    font-size: 12px;
+                                    font-weight: 800;
+                                    color: ThemePalette.text-secondary;
+                                }
+
+                                HorizontalBox {
+                                    spacing: 12px;
+                                    Text {
+                                        text: "Background Pattern Overlay";
+                                        font-size: 14px;
+                                        color: ThemePalette.text-primary;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    Button {
+                                        text: ThemePalette.show-pattern-overlay ? "Enabled (ON)" : "Disabled (OFF)";
+                                        primary: ThemePalette.show-pattern-overlay;
+                                        clicked => {
+                                            ThemePalette.show-pattern-overlay = !ThemePalette.show-pattern-overlay;
+                                            root.toggle-pattern-overlay();
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Tab 1: E2EE Security Tab
+                            if root.active-settings-tab == 1: VerticalBox {
+                                spacing: 14px;
+                                Text { text: "END-TO-END ENCRYPTION (E2EE)"; font-size: 15px; font-weight: 800; color: ThemePalette.text-primary; }
+                                Text { text: "• AES-256-GCM authenticated encryption active via ring::aead."; font-size: 13px; color: ThemePalette.success; }
+                                Text { text: "• Double-ratchet key exchanges dynamically per peer session."; font-size: 13px; color: ThemePalette.text-secondary; }
+                                Text { text: "• Zero unencrypted message payloads saved to disk or network."; font-size: 13px; color: ThemePalette.text-secondary; }
+                            }
+
+                            // Tab 2: Voice Tab
+                            if root.active-settings-tab == 2: VerticalBox {
+                                spacing: 14px;
+                                Text { text: "WEBRTC & QUIC VOICE TRANSPORT"; font-size: 15px; font-weight: 800; color: ThemePalette.text-primary; }
+                                Text { text: "• Low-latency un-ordered UDP datagram channel active."; font-size: 13px; color: ThemePalette.text-secondary; }
+                                Text { text: "• Zero head-of-line blocking for real-time audio/video frames."; font-size: 13px; color: ThemePalette.text-secondary; }
+                            }
+
+                            // Tab 3: About Tab
+                            if root.active-settings-tab == 3: VerticalBox {
+                                spacing: 14px;
+                                Text { text: "Nexus Suite v0.1.0 Native Engine"; font-size: 16px; font-weight: 800; color: ThemePalette.text-accent; }
+                                Text { text: "Electron-Free, Native GPU Slint + Tokio Daemon + QUIC + SQLite WAL."; font-size: 13px; color: ThemePalette.text-secondary; }
+                                Text { text: "Memory Footprint Target: < 38 MB RAM."; font-size: 13px; color: ThemePalette.success; font-weight: 700; }
+                            }
+
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Full-Screen / Centered Onboarding Login & Sign Up Glassmorphic Auth Modal Overlay
+        if !root.is-authenticated: Rectangle {
+            width: 100%;
+            height: 100%;
+            background: ThemePalette.background; // Solid backdrop protecting workspace
+
+            Rectangle {
+                width: 440px;
+                height: 380px;
+                background: ThemePalette.surface;
+                border-radius: 20px;
+                border-width: 1px;
+                border-color: ThemePalette.border;
+
+                VerticalBox {
+                    padding: 28px;
+                    spacing: 16px;
+
+                    // Brand Title Header
+                    HorizontalBox {
+                        spacing: 10px;
+                        Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            border-radius: 18px;
+                            background: ThemePalette.accent;
+
+                            Text {
+                                text: "N";
+                                font-size: 18px;
+                                font-weight: 900;
+                                color: #ffffff;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Text {
+                            text: "Nexus Suite Authentication";
+                            font-size: 18px;
+                            font-weight: 800;
+                            color: ThemePalette.text-primary;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Text {
+                        text: root.auth-mode == 0 ? "Sign in to your self-sovereign E2EE account:" : "Create a new local account & E2EE identity:";
+                        font-size: 12px;
+                        color: ThemePalette.text-secondary;
+                    }
+
+                    // Credentials Input Fields
+                    user-field := LineEdit {
+                        placeholder-text: "Username...";
+                    }
+
+                    pass-field := LineEdit {
+                        placeholder-text: "Password...";
+                        input-type: password;
+                    }
+
+                    if root.auth-error != "": Text {
+                        text: root.auth-error;
+                        font-size: 12px;
+                        color: #ef4444;
+                        font-weight: 600;
+                    }
+
+                    HorizontalBox {
+                        spacing: 10px;
+
+                        Button {
+                            text: root.auth-mode == 0 ? "Switch to Sign Up" : "Switch to Sign In";
+                            clicked => {
+                                root.auth-mode = (root.auth-mode == 0) ? 1 : 0;
+                                root.auth-error = "";
+                            }
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        Button {
+                            text: root.auth-mode == 0 ? "Sign In" : "Create Account";
+                            primary: true;
+                            clicked => {
+                                root.authenticate-user(user-field.text, pass-field.text, root.auth-mode == 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
