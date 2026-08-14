@@ -323,7 +323,12 @@ impl DaemonActor {
                             }
                             Err(e) => {
                                 warn!("[AUTH] User account creation failed for {}: {}", username, e);
-                                let _ = self.event_tx.send(DaemonEvent::AuthFailure { error: e.to_string() }).await;
+                                let error_msg = if e.to_string().contains("UNIQUE constraint failed") {
+                                    "Username already registered. Please choose another username or sign in.".to_string()
+                                } else {
+                                    e.to_string()
+                                };
+                                let _ = self.event_tx.send(DaemonEvent::AuthFailure { error: error_msg }).await;
                             }
                         }
                     } else {

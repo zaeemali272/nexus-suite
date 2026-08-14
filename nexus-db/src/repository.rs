@@ -306,6 +306,25 @@ impl MessageRepository {
         Ok(friends)
     }
 
+    /// Get all registered user accounts stored in SQLite.
+    pub async fn get_registered_users(&self) -> NexusResult<Vec<(PeerId, String)>> {
+        let rows = sqlx::query("SELECT id, username FROM users ORDER BY created_at ASC")
+            .fetch_all(self.pool.inner())
+            .await
+            .map_err(|e| NexusError::Database(format!("Failed to fetch registered users: {e}")))?;
+
+        let mut users = Vec::new();
+        for row in rows {
+            let id_str: String = row.get("id");
+            let username: String = row.get("username");
+            if let Ok(peer_id) = PeerId::from_str(&id_str) {
+                users.push((peer_id, username));
+            }
+        }
+
+        Ok(users)
+    }
+
     /// Resolve user profile by unique User ID (UUID) or username handle.
     pub async fn resolve_user_by_id_or_username(&self, query: &str) -> NexusResult<Option<(PeerId, String)>> {
         let query_trimmed = query.trim();
@@ -660,5 +679,25 @@ mod tests {
         let resolved_by_id = repo.resolve_user_by_id_or_username(&user_id_str).await.unwrap();
         assert!(resolved_by_id.is_some());
         assert_eq!(resolved_by_id.unwrap().1, "bob");
+    }
+
+    #[tokio::test]
+    async fn test_get_registered_users() {
+        let tmp = NamedTempFile::new().unwrap();
+        let config = DbConfig {
+            db_path: tmp.path().to_path_buf(),
+            max_connections: 5,
+        };
+
+        let pool = DatabasePool::connect(&config).await.expect("DB pool failed");
+        let repo = MessageRepository::new(pool);
+
+        repo.create_user_account("alice", "pass123").await.unwrap();
+        repo.create_user_account("charlie", "pass456").await.unwrap();
+
+        let users = repo.get_registered_users().await.unwrap();
+        assert_eq!(users.len(), 2);
+        assert_eq!(users[0].1, "alice");
+        assert_eq!(users[1].1, "charlie");
     }
 }

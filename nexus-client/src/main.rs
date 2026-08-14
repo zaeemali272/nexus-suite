@@ -141,19 +141,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let messages_model = Rc::new(VecModel::from(initial_messages));
     app.set_messages(ModelRc::from(messages_model.clone()));
 
-    // Populate active members list model
-    let initial_members = vec![
-        MemberData {
-            name: "Alice (You)".into(),
-            status: "Online".into(),
-            is_in_voice: false,
-        },
-        MemberData {
-            name: "Bob".into(),
-            status: "In Voice".into(),
-            is_in_voice: true,
-        },
-    ];
+    // Populate active members list model dynamically from SQLite users database
+    let registered_users = repo.get_registered_users().await.unwrap_or_default();
+    let mut initial_members = Vec::new();
+    if app.get_is_authenticated() {
+        let active_user = app.get_active_username().to_string();
+        if !active_user.is_empty() {
+            initial_members.push(MemberData {
+                name: format!("{} (You)", active_user).into(),
+                status: "Online".into(),
+                is_in_voice: false,
+            });
+        }
+        for (_peer_id, username) in &registered_users {
+            if username != &active_user {
+                initial_members.push(MemberData {
+                    name: username.clone().into(),
+                    status: "Online".into(),
+                    is_in_voice: false,
+                });
+            }
+        }
+    } else {
+        for (_peer_id, username) in &registered_users {
+            initial_members.push(MemberData {
+                name: username.clone().into(),
+                status: "Online".into(),
+                is_in_voice: false,
+            });
+        }
+    }
     app.set_active_members(ModelRc::from(Rc::new(VecModel::from(initial_members))));
 
     // 5. Wire Slint Callback: `on_send_message`
@@ -334,12 +351,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 DaemonEvent::AuthSuccess { username, .. } => {
                     info!("Received AuthSuccess for user: {}", username);
                     let app_weak = app_handle_events.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(app) = app_weak.upgrade() {
-                            app.set_is_authenticated(true);
-                            app.set_active_username(username.into());
-                            app.set_auth_error("".into());
-                        }
+                    let repo_auth = repo.clone();
+                    let user_auth = username.clone();
+                    tokio::spawn(async move {
+                        let registered = repo_auth.get_registered_users().await.unwrap_or_default();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(app) = app_weak.upgrade() {
+                                app.set_is_authenticated(true);
+                                app.set_active_username(user_auth.clone().into());
+                                app.set_auth_error("".into());
+
+                                let mut updated_members = vec![MemberData {
+                                    name: format!("{} (You)", user_auth).into(),
+                                    status: "Online".into(),
+                                    is_in_voice: false,
+                                }];
+                                for (_id, u) in &registered {
+                                    if u != &user_auth {
+                                        updated_members.push(MemberData {
+                                            name: u.clone().into(),
+                                            status: "Online".into(),
+                                            is_in_voice: false,
+                                        });
+                                    }
+                                }
+                                app.set_active_members(ModelRc::from(Rc::new(VecModel::from(updated_members))));
+                            }
+                        });
                     });
                 }
                 DaemonEvent::AuthFailure { error } => {
