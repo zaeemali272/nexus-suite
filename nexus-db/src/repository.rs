@@ -306,6 +306,60 @@ impl MessageRepository {
         Ok(friends)
     }
 
+    /// Resolve user profile by unique User ID (UUID) or username handle.
+    pub async fn resolve_user_by_id_or_username(&self, query: &str) -> NexusResult<Option<(PeerId, String)>> {
+        let query_trimmed = query.trim();
+
+        // 1. First try matching by exact username in `users`
+        let row_by_user = sqlx::query("SELECT id, username FROM users WHERE username = ?")
+            .bind(query_trimmed)
+            .fetch_optional(self.pool.inner())
+            .await
+            .map_err(|e| NexusError::Database(format!("Failed to resolve user by username: {e}")))?;
+
+        if let Some(r) = row_by_user {
+            let id_str: String = r.get("id");
+            let username: String = r.get("username");
+            if let Ok(peer_id) = PeerId::from_str(&id_str) {
+                return Ok(Some((peer_id, username)));
+            }
+        }
+
+        // 2. Try matching by exact PeerId / User ID string
+        if let Ok(peer_id) = PeerId::from_str(query_trimmed) {
+            let row_by_id = sqlx::query("SELECT username FROM users WHERE id = ?")
+                .bind(peer_id.to_string())
+                .fetch_optional(self.pool.inner())
+                .await
+                .map_err(|e| NexusError::Database(format!("Failed to resolve user by ID: {e}")))?;
+
+            if let Some(r) = row_by_id {
+                let username: String = r.get("username");
+                return Ok(Some((peer_id, username)));
+            } else {
+                return Ok(Some((peer_id, query_trimmed.to_string())));
+            }
+        }
+
+        // 3. Fallback matching in `peers` table
+        let row_by_peer = sqlx::query("SELECT id, username FROM peers WHERE username = ? OR id = ?")
+            .bind(query_trimmed)
+            .bind(query_trimmed)
+            .fetch_optional(self.pool.inner())
+            .await
+            .map_err(|e| NexusError::Database(format!("Failed to query peers table: {e}")))?;
+
+        if let Some(r) = row_by_peer {
+            let id_str: String = r.get("id");
+            let username: String = r.get("username");
+            if let Ok(peer_id) = PeerId::from_str(&id_str) {
+                return Ok(Some((peer_id, username)));
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Create a new user account with hashed password and store session & default peer record in SQLite.
     pub async fn create_user_account(&self, username: &str, password_raw_or_hash: &str) -> NexusResult<(String, String)> {
         let user_id = uuid::Uuid::new_v4().to_string();
@@ -583,5 +637,28 @@ mod tests {
         assert_eq!(active[0].1, "127.0.0.1:4433");
         assert_eq!(active[0].2, "Connected");
         assert_eq!(active[0].3, 12.5);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_user_by_id_or_username() {
+        let tmp = NamedTempFile::new().unwrap();
+        let config = DbConfig {
+            db_path: tmp.path().to_path_buf(),
+            max_connections: 5,
+        };
+
+        let pool = DatabasePool::connect(&config).await.expect("DB pool failed");
+        let repo = MessageRepository::new(pool);
+
+        let (user_id_str, _) = repo.create_user_account("bob", "secret123").await.unwrap();
+        let resolved = repo.resolve_user_by_id_or_username("bob").await.unwrap();
+        assert!(resolved.is_some());
+        let (peer_id, username) = resolved.unwrap();
+        assert_eq!(username, "bob");
+        assert_eq!(peer_id.to_string(), user_id_str);
+
+        let resolved_by_id = repo.resolve_user_by_id_or_username(&user_id_str).await.unwrap();
+        assert!(resolved_by_id.is_some());
+        assert_eq!(resolved_by_id.unwrap().1, "bob");
     }
 }

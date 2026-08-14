@@ -6,26 +6,48 @@ use nexus_daemon::{DaemonActor, DaemonCommand, DaemonEvent};
 use nexus_db::{DatabasePool, DbConfig, MessageRepository};
 use nexus_net::{P2pEndpointManager, WebRtcVoiceSession};
 use slint::{ComponentHandle, ModelRc, VecModel};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use tempfile::NamedTempFile;
 use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
-    info!("Starting Nexus Suite Native Slint GUI Client with P2P QUIC & WebRTC event loop...");
+    info!("Starting Nexus Suite Native Slint GUI Client with Zero-Config Auto-Initialization...");
 
     let p2p_manager = Arc::new(P2pEndpointManager::bind("0.0.0.0:0".parse().unwrap())?);
 
-    // 1. Initialize DB Pool & Repository
-    let tmp = NamedTempFile::new()?;
+    // 1. Network & Tailscale P2P Mesh Auto-Discovery
+    let ts_mesh_ip = match tokio::process::Command::new("tailscale")
+        .args(["ip", "-4"])
+        .output()
+        .await
+    {
+        Ok(out) if out.status.success() => {
+            let ip = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !ip.is_empty() { Some(ip) } else { None }
+        }
+        _ => None,
+    };
+
+    if let Some(ref ip) = ts_mesh_ip {
+        info!("[AUTO-DISCOVERY] Active Tailscale P2P mesh tunnel detected: {}", ip);
+    } else {
+        info!("[AUTO-DISCOVERY] Tailscale mesh inactive. Operating over local interfaces / loopback.");
+    }
+
+    // 2. Initialize Persistent SQLite Database Pool & Repository
+    let db_path = std::env::var("NEXUS_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("nexus.db"));
     let db_config = DbConfig {
-        db_path: tmp.path().to_path_buf(),
+        db_path: db_path.clone(),
         max_connections: 5,
     };
     let db_pool = DatabasePool::connect(&db_config).await?;
     let repo = Arc::new(MessageRepository::new(db_pool));
+    info!("[STORAGE] SQLite persistent database storage initialized at {:?}", db_path);
 
     // 2. Initialize Tokio Daemon Actor
     let (actor, cmd_tx, mut event_rx) = DaemonActor::new();
@@ -250,7 +272,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // 8. Wire Slint Callback: `on_add_friend_request`
-    let repo_friend = repo.clone();
     let cmd_tx_friend = cmd_tx.clone();
     app.on_add_friend_request(move |target_str| {
         let username = target_str.to_string();
@@ -258,22 +279,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return;
         }
 
-        let friend_peer_id = PeerId::new();
-        let repo_inner = repo_friend.clone();
         let cmd_inner = cmd_tx_friend.clone();
-        let user_clone = username.clone();
-
+        let user_query = username.clone();
         tokio::spawn(async move {
-            let _ = repo_inner.add_friend_request(friend_peer_id, &user_clone).await;
             let _ = cmd_inner
-                .send(DaemonCommand::SendFriendRequest {
-                    peer_id: friend_peer_id,
-                    username: user_clone,
+                .send(DaemonCommand::ResolveFriend {
+                    query: user_query,
                 })
                 .await;
         });
 
-        info!("Dispatched friend request for user/peer: {}", username);
+        info!("Dispatched user ID friend resolution query: {}", username);
     });
 
     // 9. Wire Slint Callback: `on_authenticate_user`
@@ -346,6 +362,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 DaemonEvent::TelemetrySummary { summary, .. } => {
                     info!("[CLIENT TELEMETRY] {}", summary);
+                }
+                DaemonEvent::FriendResolved { peer_id, username, public_endpoint } => {
+                    info!("[FRIEND RESOLVED & P2P AUTO-CONNECT] Resolved peer {} ({}) with endpoint {:?}", username, peer_id, public_endpoint);
+                    let cmd_inner = cmd_tx.clone();
+                    let p2p_addr = p2p_manager.local_addr().unwrap_or_else(|_| "127.0.0.1:0".parse().unwrap());
+                    tokio::spawn(async move {
+                        let _ = cmd_inner
+                            .send(DaemonCommand::InitiateP2pRendezvous {
+                                sender_peer_id: my_peer_id,
+                                target_peer_id: peer_id,
+                                local_endpoint: p2p_addr,
+                                pubkey: vec![1, 2, 3, 4],
+                            })
+                            .await;
+                    });
+                }
+                DaemonEvent::FriendResolutionFailed { query, reason } => {
+                    warn!("[FRIEND RESOLUTION FAILED] Unable to resolve user/handle '{}': {}", query, reason);
                 }
                 DaemonEvent::P2pRendezvousMatched { target_peer_id, public_endpoint, local_endpoint, .. } => {
                     info!("[P2P RENDEZVOUS MATCHED] Exchanged endpoints for target {}: public {}, local {}", target_peer_id, public_endpoint, local_endpoint);

@@ -6,6 +6,7 @@ use nexus_core::{EncryptedMessage, Message, NexusResult, PeerId, SymKey};
 use nexus_db::MessageRepository;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -109,6 +110,7 @@ pub enum DaemonCommand {
     StopVoiceChannel { peer_id: PeerId },
     SendFriendRequest { peer_id: PeerId, username: String },
     AcceptFriendRequest { peer_id: PeerId },
+    ResolveFriend { query: String },
     CreateAccount { username: String, password_hash: String },
     AuthenticateUser { username: String, password_hash: String },
     InitiateP2pRendezvous {
@@ -132,6 +134,8 @@ pub enum DaemonEvent {
     VoiceChannelStarted(PeerId),
     VoiceChannelStopped(PeerId),
     FriendRequestReceived { peer_id: PeerId, username: String },
+    FriendResolved { peer_id: PeerId, username: String, public_endpoint: Option<SocketAddr> },
+    FriendResolutionFailed { query: String, reason: String },
     AuthSuccess { user_id: String, username: String, token: String },
     AuthFailure { error: String },
     TelemetrySummary { summary: String, active_connections: usize },
@@ -287,6 +291,28 @@ impl DaemonActor {
                         .send(DaemonEvent::PeerConnected(peer_id))
                         .await;
                 }
+                DaemonCommand::ResolveFriend { query } => {
+                    info!("Resolving friend by User ID / Username query: {}", query);
+                    let resolved = if let Some(repo) = &self.repo {
+                        repo.resolve_user_by_id_or_username(&query).await.ok().flatten()
+                    } else if let Ok(peer_id) = PeerId::from_str(&query) {
+                        Some((peer_id, query.clone()))
+                    } else {
+                        Some((PeerId::new(), query.clone()))
+                    };
+
+                    if let Some((peer_id, username)) = resolved {
+                        if let Some(repo) = &self.repo {
+                            let _ = repo.add_friend_request(peer_id, &username).await;
+                        }
+                        let public_ep = self.peer_registry.connections.get(&peer_id).map(|p| p.endpoint);
+                        info!("[FRIEND RESOLVED] Mapped friend {} ({}) -> endpoint {:?}", username, peer_id, public_ep);
+                        let _ = self.event_tx.send(DaemonEvent::FriendResolved { peer_id, username, public_endpoint: public_ep }).await;
+                    } else {
+                        warn!("[FRIEND RESOLUTION FAILED] Could not locate user ID or handle: {}", query);
+                        let _ = self.event_tx.send(DaemonEvent::FriendResolutionFailed { query, reason: "User ID not found".to_string() }).await;
+                    }
+                }
                 DaemonCommand::CreateAccount { username, password_hash } => {
                     info!("Processing local user account creation for: {}", username);
                     if let Some(repo) = &self.repo {
@@ -403,7 +429,25 @@ mod tests {
             assert_eq!(peer_id, peer);
             assert_eq!(state, SessionState::EncryptedSessionEstablished);
         } else {
-            panic!("Expected EncryptedSessionEstablished event");
+            panic!("Expected SessionStateChanged event");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_daemon_actor_resolve_friend_flow() {
+        let (actor, cmd_tx, mut event_rx) = DaemonActor::new();
+        tokio::spawn(async move {
+            actor.run().await.unwrap();
+        });
+
+        let target_peer = PeerId::new();
+        cmd_tx.send(DaemonCommand::ResolveFriend { query: target_peer.to_string() }).await.unwrap();
+
+        if let Some(DaemonEvent::FriendResolved { peer_id, username, .. }) = event_rx.recv().await {
+            assert_eq!(peer_id, target_peer);
+            assert_eq!(username, target_peer.to_string());
+        } else {
+            panic!("Expected FriendResolved event");
         }
     }
 }
