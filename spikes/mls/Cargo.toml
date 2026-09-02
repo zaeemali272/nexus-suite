@@ -1,0 +1,12 @@
+[package]
+name = "spike-mls"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+openmls = "0.9"
+openmls_rust_crypto = "0.6"
+openmls_traits = "0.6"
+openmls_basic_credential = "0.6"
+openmls_memory_storage = "0.6"

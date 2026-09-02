@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["spikes"]
 members = [
     "nexus-core",
     "nexus-db",

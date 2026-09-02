@@ -1,30 +1,48 @@
-# MISSION OBJECTIVE
-You are the lead systems architect and sole developer for "nexus-suite", an ultra-high-performance, native, Electron-free, cross-platform communication suite (Discord/Element alternative) built for Linux, Windows, macOS, Android, and iOS. 
+# AGENTS.md — Working agreement for Nexus Suite
 
-Your job is to build the entire repository from scratch autonomously. Zero bloat, sub-40MB memory usage, maximum performance, and clean, production-grade Rust code are non-negotiable.
+Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/DECISIONS.md`](docs/DECISIONS.md)
+before making structural changes. Read [`docs/AUDIT.md`](docs/AUDIT.md) before trusting anything
+the old documentation claimed.
 
-## TECHNOLOGICAL STACK
-- **Core / Workspace:** Rust (Cargo workspace with strict release optimizations: `opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "abort"`).
-- **Database:** SQLite via `sqlx` with Write-Ahead Logging (WAL mode) and zero-copy deserialization using `serde`.
-- **Networking:** QUIC transport protocol via the `quinn` crate, featuring multiplexed streams for chat control, high-priority low-latency audio datagrams, and bulk file transfers.
-- **State & Daemon:** Tokio asynchronous actor runtime (`nexus-daemon`) handling offline message queuing and state synchronization.
+## What this project is
 
-## YOUR IMMEDIATE EXECUTION TASKS (PHASE 1)
-Execute the following steps step-by-step:
+A native, peer-to-peer, end-to-end encrypted communication client in Rust. Desktop
+(Linux/Windows/macOS) and Android. No browser engine, no trusted server, no invented
+cryptography.
 
-1. **Workspace Initialization:** 
-   - Create the root Cargo workspace `nexus-suite` containing members: `nexus-core`, `nexus-db`, `nexus-net`, `nexus-daemon`, and `nexus-client`.
-   - Setup workspace-wide lints to treat all warnings as errors (`#![deny(warnings)]`).
+## Non-negotiable rules
 
-2. **Database Engine (`nexus-db`):**
-   - Write SQLite migration scripts (`sqlx`) establishing optimized schemas for `users`, `channels`, `messages` (using ULIDs for time-sorted ordering), and encryption keys.
-   - Enforce performance PRAGMAs (`journal_mode = WAL`, `synchronous = NORMAL`, `foreign_keys = ON`).
+1. **Never design cryptography.** Use `openmls` for group encryption, `ring` for primitives,
+   `rustls` for transport. A proposal to write a custom cryptographic protocol requires external
+   review before it is merged. See ADR-002.
+2. **Never disable certificate verification** — not in tests, not behind a feature flag, not
+   temporarily. The prototype's `SkipServerVerification` is deleted, not preserved. See ADR-003.
+3. **Never claim something works without running it.** The previous documentation marked four
+   phases COMPLETE against unimplemented features and published benchmark numbers that were
+   never measured. If it is not implemented, say so. If it is not measured, do not state a
+   figure.
+4. **Never regress a performance budget** (`BRD.md` §6.1) without an explicit, agreed change to
+   the budget. CI enforces this.
+5. **No allocation in the audio callback.** Ever.
+6. **Application logic never lives in the UI crate.** It goes in `nexus-app` or below, so the
+   toolkit stays replaceable. See ADR-004.
 
-3. **Networking Layer (`nexus-net`):**
-   - Implement the `quinn`-based QUIC endpoint initialization with `rustls` configuration.
-   - Setup multiplexed stream handlers to keep text and audio channels completely independent.
+## Conventions
 
-4. **Background Daemon (`nexus-daemon`):**
-   - Wire up the `tokio` event loop and `mpsc` channels to map incoming QUIC network streams directly into local SQLite persistence storage with automatic offline queue flushing.
+- `cargo clippy --workspace --all-targets -- -D warnings` must pass. Warnings are errors.
+- Public items carry doc comments. Modules carry a `//!` header explaining their role.
+- Errors are typed via `thiserror`; no `unwrap()` or `expect()` outside tests and startup
+  invariants.
+- Key material uses `zeroize` wrappers and never appears in `Debug` output, logs, or panics.
+- Tests assert real behaviour. A test that pushes a value into a channel and reads it back is
+  testing the channel, not the feature — the prototype had several of these.
+- Anything parsing untrusted input gets a fuzz target.
 
-Begin execution immediately. Create the directory structures, write the code files, configure the build options, and verify compilation via cargo check.
+## Current phase
+
+**Phase 0 — de-risking spikes.** See [`docs/ROADMAP.md`](docs/ROADMAP.md). The purpose is to
+validate the Slint UI capability, the voice pipeline, NAT traversal rates, MLS integration, and
+compression ratios *before* building on them. Throwaway code is expected here; production
+discipline resumes in Phase 1.
+
+Do not start Phase 1 work until the Phase 0 gate is met or the relevant ADR is revised.
